@@ -1,2 +1,15 @@
-# ptokens-verifier
-Script automating the process to build the running app and verify the proof from a given pToken bridge. 
+# pTokens Verifier
+
+## Requirements
+
+ * jq (`apt-get install jq`)
+ * git (`apt-get install git`)
+ * [Docker CE (v19)](https://docs.docker.com/get-docker)
+
+**Note:** you must configure docker to run without `sudo`, please follow the instructions [here](https://docs.docker.com/engine/install/linux-postinstall/).
+
+## One liner
+
+```bash
+./bridge-verifier https://pbtconeos-1a.ngrok.io/pbtc-on-eos
+```

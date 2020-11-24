@@ -1,0 +1,7 @@
+*.log
+*.txt
+.venv
+.exclude
+cache
+LICENCE
+README.md
