@@ -11,5 +11,5 @@
 ## One liner
 
 ```bash
-./bridge-verifier https://pbtconeos-1a.ngrok.io/pbtc-on-eos
+./bridge-verifier https://pbtconeos-node-1a.ngrok.io/pbtc-on-eos
 ```
