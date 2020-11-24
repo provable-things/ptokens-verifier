@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+
+import sys
+import logging
+
+from utils.parsing import get_args
+from utils.proof import Proof
+from utils.logger import MAGIC_LEVEL_MAP
+
+def main():
+    try:
+        args = get_args()
+
+        fmt = '[%(levelname)4s] %(message)s'
+        formatter = logging.Formatter(fmt, '')
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
+        logger = logging.getLogger()
+        logger.addHandler(stream_handler)
+        logger.setLevel(MAGIC_LEVEL_MAP[args.logging])
+
+        proof = Proof.parse(args.filename)
+        proof.set_logger(logger)
+
+        if proof.verify_all(args.apkhash, args.apkcerthash):
+            sys.exit(0)
+        else:
+            sys.exit(1)
+    except Exception as e:
+        print(f"Exception: {e}")
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,12 @@
+[MESSAGES CONTROL]
+
+
+
+[DESIGN]
+
+max-args=7
+max-locals=15
+
+[REPORTS]
+
+msg-template='[{msg_id}] {path}:{line:3d}: {msg} ({symbol})'

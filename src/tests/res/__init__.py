@@ -1,0 +1,6 @@
+RESOURCE_APP_DEBUG_APK = './tests/res/app-debug.apk'
+RESOURCE_APK_CERTIFICATE_DIGEST = '1de35be63eaea67abc3f52fefdd684ee39145430ffb60fa940d9814fdef7d9fe'
+PROOF_ANDROID_COMPLETE = './tests/res/android_complete.proof'
+PROOF_ANDROID_STRONGBOX_ONLY = './tests/res/android_strongbox_only.proof'
+PROOF_ANDROID_SAFETYNET_ONLY = './tests/res/android_safetynet_only.proof'
+PROOF_ANDROID_EMPTY = './tests/res/android_empty.proof'

@@ -1,0 +1,581 @@
+#!/bin/bash
+
+#
+# Provable Things Ltd (info@provable.xyz)
+#
+
+VERSION=1.4
+
+if [[ -z "$GITHUB_ACCESS_SSH_KEY_PATH" ]]; then
+	GITHUB_ACCESS_SSH_KEY_PATH="~/.ssh/id_rsa"	
+fi
+
+if [[ -z "$GITHUB_PATH" ]]; then
+	GITHUB_PATH="https://github.com/provable-things/ptokens-bridges.git"
+fi
+
+if [[ -z "$IPFS_GATEWAY" ]]; then
+	IPFS_GATEWAY=https://cloudflare-ipfs.com
+fi
+
+APP_VERSION_KEY_NAME=app_version
+DOCKER_SRC_CODE_PATH=/home/provable/apps/strongbox
+DOCKER_CACHE_PATH=/home/provable/cache
+DOCKER_APKDIFF_VERSION=1.0
+DOCKER_BUILD_VERSION=1.0
+DOCKER_VERIFIER_VERSION=1.2
+BRIDGE_REGEX='p[a-z]{2,}-on-[a-z]{3,}'
+CACHE_PATH=./cache
+DEBUG=0
+INFO=1
+
+ERROR_INVALID_BRIDGE_URL="Invalid bridge's URL"
+ERROR_NOT_VALID_PROOF_TYPE="Invalid proof type"
+ERROR_INVALID_GITHUB_URL="Invalid github url"
+ERROR_INVALID_VERSION_TAG="Invalid version tag"
+ERROR_INVALID_SOURCE_FOLDER="Invalid source folder"
+
+function print_version() {
+	echo "v$VERSION"
+	exit 0
+}
+
+function print_usage() {
+	local format
+	local exec_name
+
+	format="  %-30s %-20s\n"
+	exec_name=$1
+	printf "Usage:\n"
+	printf "./$exec_name <url>\n"
+	printf "./$exec_name check-build <url>\n"
+	printf "./$exec_name check-proof <url>\n"
+	printf "./$exec_name help\n"
+	printf "\n"
+	printf "Commands:\n"
+	printf "$format" "<no-command>" "performs 'check-build' and then 'check-proof'"
+	printf "\n"
+	printf "$format" "check-proof"  "downloads the untrusted app from IPFS and then"
+	printf "$format" "" 		    "verifies the proof"
+	printf "\n"
+	printf "$format" "check-build"  "clones the repository from github, builds the "
+	printf "$format" "" 		    "app and checks the differences with the "
+	printf "$format" "" 			"one downloaded from IPFS"
+	printf "\n"
+	printf "$format" "help" 		"shows this help"
+	printf "\n"
+	printf "Parameters:\n"
+	printf "$format" "url" 			"bridge's URL"
+	printf "\n"
+	printf "Advanced configuration (env variables):\n"
+	printf "$format" "GITHUB_ACCESS_SSH_KEY_PATH" "optional ssh key to access github if GITHUB_PATH is private "
+	printf "$format" "" 						  "(default: $GITHUB_ACCESS_SSH_KEY_PATH)"
+	printf "\n"
+	printf "$format" "GITHUB_PATH" 	  	  		  "full path (or prefix) where to retrieve the source code from"
+	printf "$format" "" 				  		  "(default: $GITHUB_PATH)"
+	printf "\n"
+	printf "$format" "IPFS_GATEWAY" 		  	  "IPFS gateway used to retrieve the untrusted "
+	printf "$format" "" 					  	  "app (default: $IPFS_GATEWAY)"
+	printf "\n"
+	exit 0
+}
+
+function logd() {
+	local output
+	output=""
+	if [[ -z "$1" ]]; then read output; else output="$1"; fi
+	if ! [[ -z $DEBUG ]]; then echo "[DEBUG]: $1"; fi
+}
+
+function logi() {
+	local output
+	output=""
+	if [[ -z "$1" ]]; then read output; else output="$1"; fi
+	if [[ ! -z $DEBUG || ! -z $INFO ]]; then echo "[INFO]: $output"; fi
+}
+
+function loge() {
+	echo "[ERROR]: $1"
+}
+
+function build_app() {
+	local bridge_name
+	local src_folder
+
+	bridge_name=$1
+	src_folder=$2
+
+	docker run \
+	    -v gradle:/home/provable/.gradle \
+	    -v $(pwd)/$src_folder:$DOCKER_SRC_CODE_PATH \
+	    --env BRIDGE_NAME=$bridge_name \
+	    provable/ptokens-strongbox-build:${DOCKER_BUILD_VERSION} assembleDebug exportApkDebugUnsigned
+}
+
+function verify_proof() {
+	local src_folder
+	local app_path
+	local proof_path
+
+	src_folder=$1
+	app_path=$2
+	proof_path=$3
+	
+	docker run \
+		-v $(pwd)/$CACHE_PATH:$DOCKER_CACHE_PATH \
+		--env INFO=1 \
+		--env DEBUG=$DEBUG \
+		provable/ptokens-verifier:${DOCKER_VERIFIER_VERSION} $app_path $proof_path
+}
+
+function github_ssh_clone() {
+	local github_url
+	local version_tag
+	local src_folder
+
+	github_url=$1
+	version_tag=$2
+	src_folder=$3
+
+	exit_if_empty "$github_url" "$ERROR_INVALID_GITHUB_URL"
+	exit_if_empty "$version_tag" "$ERROR_INVALID_VERSION_TAG"
+	exit_if_empty "$src_folder" "$ERROR_INVALID_SOURCE_FOLDER"
+
+	logi "Cloning repo $github_url"
+	ssh-agent bash -c " \
+		ssh-add $GITHUB_ACCESS_SSH_KEY_PATH; \
+		git clone $github_url --recursive --branch $version_tag $src_folder \
+	"
+}
+
+function github_https_clone() {
+	local github_url
+	local version_tag
+	local src_folder
+
+	github_url=$1
+	version_tag=$2
+	src_folder=$3
+
+	exit_if_empty "$github_url" "$ERROR_INVALID_GITHUB_URL"
+	exit_if_empty "$version_tag" "$ERROR_INVALID_VERSION_TAG"
+	exit_if_empty "$src_folder" "$ERROR_INVALID_SOURCE_FOLDER"
+
+	local output_repo
+
+	github_url=`echo $github_url | sed 's/\.git//g'`
+
+	output_repo=repo.tar.gz
+	github_url="$github_url/archive/$version_tag.tar.gz"
+	
+	logi "Cloning repo $github_url"
+	curl -s -L "$github_url" --output "$output_repo"
+	
+	tar -xzf "$output_repo" 
+	rm -rf "$output_repo"
+	
+	local repo_name
+	local extracted_folder
+	local px_on_y_subfolder
+	local strongbox_folder
+
+	repo_name=`echo $github_url | egrep -o 'ptokens-[a-z\-]*'`
+	extracted_folder=$repo_name-`echo $version_tag | tr -d 'v'`
+	px_on_y_subfolder=`echo "$src_folder" | egrep -o "$BRIDGE_REGEX"`
+	strongbox_folder=$extracted_folder/$px_on_y_subfolder/apps/strongbox
+
+	if [[ ! -d "$strongbox_folder" ]]; then
+		loge "Folder /apps/strongbox not found in $extracted_folder"
+		exit 1
+	fi
+	
+	mv "$strongbox_folder" "$src_folder"
+	rm -rf "$extracted_folder"
+}
+
+function github_clone() {
+	local github_url
+	local version_tag
+	local src_folder
+
+	github_url=$1
+	version_tag=$2
+	src_folder=$3
+
+	if [[ ! -d "$src_folder" ]]; then
+		if [[ `starts_with_git` ]]; then
+			github_ssh_clone "$github_url" "$version_tag" "$src_folder"
+		elif [[ `starts_with_https` ]]; then
+			github_https_clone "$github_url" "$version_tag" "$src_folder"
+		else
+			loge "Unable to download the repo from $github_url"
+			exit 1
+		fi
+		
+		logi "Repo downloaded into $src_folder"
+	else
+		logi "Repo exists in $src_folder"
+	fi
+}
+
+function download_app_from_ipfs() {
+	local app_multihash
+	local cached_app
+
+	app_multihash=$1
+	cached_app=$CACHE_PATH/$app_multihash
+
+	mkdir -p $CACHE_PATH
+
+	if [[ ! -f $cached_app ]]; then
+		logi "App not found, getting it through $IPFS_GATEWAY"
+
+		local file
+		local ipfs_request
+
+		file=$CACHE_PATH/$app_multihash
+		ipfs_request=$IPFS_GATEWAY/ipfs/$app_multihash
+
+		logi "Getting the app, this may take some minutes..."
+
+		curl -s $ipfs_request --output $file
+		
+		if [[ ! -f $file || $? -eq 1 ]]; then
+			loge "Failed to get the app from IPFS"
+			exit 1
+		fi
+		
+		logi "App saved in $cached_app"
+	else
+		logi "App already downloaded from IPFS"
+	fi
+}
+
+function apkdiff() {
+	local src_folder
+	local app1
+	local app2
+
+	src_folder=$1
+	app1=$2
+	app2=$3
+
+	docker run \
+		-v $(pwd)/cache:/home/provable/cache \
+		-v $(pwd)/$src_folder:/home/provable/apps/strongbox \
+	 	provable/ptokens-strongbox-apkdiff:${DOCKER_APKDIFF_VERSION} $app1 $app2 | logi
+}
+
+function appdiff() {
+	local proof_type
+	local src_folder
+	local app1
+	local app2
+
+	proof_type=$1
+	src_folder=$2
+	app1=$3
+	app2=$4
+
+	case $proof_type in
+	safetynet )
+		apkdiff $src_folder $app1 $app2
+		;;
+	strongbox )
+		apkdiff $src_folder $app1 $app2
+		;;
+	* )
+		loge "$ERROR_NOT_VALID_PROOF_TYPE"
+		exit 1
+		;;
+	esac	
+
+}
+
+function exit_if_empty() {
+	local var
+	local err
+	local opt
+
+    var=$1
+    err=$2
+    opt=$3
+
+    if [[ -z "$var" ]]; then
+        if [[ "$opt" == "w" ]]; then
+            loge "$err"
+        else
+            loge "$err"
+            exit 1
+        fi
+    fi
+}
+
+function check_url_works_or_exit() {
+	local url
+	local method
+
+	url=$1
+	method=GET
+	
+	if [[ ! -z "$2" ]]; then
+		method=$2	
+	fi
+	
+	error=`curl -X $method -s -I $url | egrep -o '40[0-9]'`
+	if [[ ! -z "$error" ]]; then
+		loge "$url doesn't seem to be working, HTTP code: $error"
+		exit 1
+	fi
+}
+
+function get_app_suffix() {
+	local proof_type
+
+	proof_type=$1
+	__app_suffix=$2
+	app_suffix=""
+	
+	case $proof_type in
+		safetynet )
+			app_suffix=`echo "-debug.apk"`
+			;;
+		strongbox )
+			app_suffix=`echo "-debug.apk"`
+			;;
+		* )
+			loge "$ERROR_NOT_VALID_PROOF_TYPE"
+			exit 1
+			;;
+	esac
+
+	eval $__app_suffix="'$app_suffix'"
+}
+
+function get_app_prefix() {
+	local proof_type
+	local bridge_name
+
+	proof_type=$1
+	bridge_name=$2
+	__app_prefix=$3
+	app_prefix=""
+	
+	case $proof_type in
+		safetynet )
+			app_prefix=`echo $bridge_name | tr -d '-'`
+			;;
+		strongbox )
+			app_prefix=`echo $bridge_name | tr -d '-'`
+			;;
+		* )
+			echo ""
+			;;
+	esac
+
+	eval $__app_prefix="'$app_prefix'"
+}
+
+function get_value_or_exit() {
+	local json
+	local key
+
+	json=$1
+	key=$2
+	__value=$3
+	value=`echo "$json" | jq -r .$key`
+	
+	if [[ $value == "null" || -z "$value" ]]; then
+		loge "Access to $key failed"
+		exit 1
+	fi
+	
+	eval $__value="'$value'"
+}
+
+function get_bridge_info_json() {
+	local bridge_url
+
+	bridge_url=$1
+	__bridge_info=$2
+	bridge_info=`curl -s $bridge_url/get-info`
+
+	eval $__bridge_info="'$bridge_info'"
+}
+
+function starts_with_https() {
+	echo "$GITHUB_PATH" | egrep '^https:'
+}
+
+function starts_with_git() {
+	echo "$GITHUB_PATH" | egrep '^git@'
+}
+
+function ends_with_dash() {
+	echo $GITHUB_PATH | egrep '\-$'
+}
+
+function get_github_url() {
+	local bridge_name
+
+	bridge_name=$1
+	__github_url=$2
+	github_url=""
+
+	[ `ends_with_dash` ] \
+	&& github_url=$GITHUB_PATH$bridge_name.git \
+	|| github_url=$GITHUB_PATH
+
+	eval $__github_url="'$github_url'"
+}
+
+function check_build() {
+	local bridge_url
+	local bridge_info
+
+	bridge_url=$1
+	bridge_info=$2
+
+	exit_if_empty "$bridge_url" "$ERROR_INVALID_BRIDGE_URL"
+	exit_if_empty "$bridge_info" "Invalid /get-info object"
+
+	local proof_type
+	local ipfs_multihash
+	local version_tag
+
+	get_value_or_exit "$bridge_info" "proof_type" proof_type
+	get_value_or_exit "$bridge_info" "ipfs_multihash" ipfs_multihash
+	get_value_or_exit "$bridge_info" "versions.app" version_tag
+
+	version_tag=v$version_tag
+
+	logi "Proof type detected: $proof_type"
+
+	local bridge_name
+	local src_folder
+	local github_url
+
+	bridge_name=`echo $bridge_url | egrep -o $BRIDGE_REGEX`
+	src_folder=$bridge_name-$version_tag
+	get_github_url "$bridge_name" github_url
+
+	github_clone "$github_url" "$version_tag" "$src_folder"
+
+	local app_prefix
+	local app_suffix
+
+	get_app_prefix "$proof_type" "$bridge_name" app_prefix
+	get_app_suffix "$proof_type" app_suffix
+
+	local app_host_path
+	app_host_path=$src_folder/$app_prefix$app_suffix
+
+	if [[ ! -f "$app_host_path" ]]; then
+		logi "Building the app from the code, this may take a while"
+		build_app "$bridge_name" "$src_folder" 1> /dev/null
+	else 
+		logi "Found an APK in $src_folder, skipping build..."
+	fi
+
+	download_app_from_ipfs "$ipfs_multihash"
+
+	local untrusted_app_path
+	local app_docker_path
+
+	untrusted_app_path=$CACHE_PATH/$ipfs_multihash	
+	app_docker_path=$DOCKER_SRC_CODE_PATH/$app_prefix$app_suffix
+	
+	appdiff "$proof_type" "$src_folder" "$untrusted_app_path" "$app_docker_path"
+}
+
+function check_proof() {
+	local bridge_url
+	local bridge_info
+	local download_app
+
+	bridge_url=$1
+	bridge_info=$2
+	download_app=$3
+
+	local bridge_name
+	local version_tag
+	local src_folder
+	local proof_path
+	local evidence
+
+	bridge_name=`echo $bridge_url | egrep -o $BRIDGE_REGEX`
+	version_tag=`echo $bridge_info | jq -r .versions.app`
+	version_tag=v$version_tag
+	src_folder=$bridge_name-$version_tag
+	proof_path=$CACHE_PATH/evidence.proof
+	evidence=`curl --silent $bridge_url/generate-evidence`
+	
+	local proof
+	local app_multihash
+
+	get_value_or_exit "$evidence" "proof" proof
+	get_value_or_exit "$evidence" "ipfsMultihash" app_multihash
+
+	echo $proof > $proof_path
+	
+	logi "Evidence downloaded into $proof_path"
+
+	local untrusted_app_path
+	untrusted_app_path=$CACHE_PATH/$app_multihash
+	[ -f "$untrusted_app_path" ] && : || download_app_from_ipfs "$app_multihash"
+	
+	verify_proof "$src_folder" "$untrusted_app_path" "$proof_path"
+}
+
+function main() {
+	local exec_name
+	local command
+	local bridge_url
+	local bridge_info
+
+	exec_name=`basename $0`
+	command=$1
+
+	case $command in
+	check-build )
+		bridge_url=$2
+		exit_if_empty "$bridge_url" "$ERROR_INVALID_BRIDGE_URL"
+		check_url_works_or_exit "$bridge_url/ping"
+		get_bridge_info_json "$bridge_url" bridge_info
+		
+		check_build "$bridge_url" "$bridge_info"
+		exit 0
+		;;
+	check-proof )
+		bridge_url=$2
+		exit_if_empty "$bridge_url" "$ERROR_INVALID_BRIDGE_URL"
+		check_url_works_or_exit "$bridge_url/ping"
+		get_bridge_info_json "$bridge_url" bridge_info
+
+		check_proof "$bridge_url" "$bridge_info"
+		exit 0
+		;;
+	help )
+		print_usage "$exec_name"
+		exit 0
+		;;
+	version )
+		print_version
+		exit 0
+		;;
+	*) 
+		[ -z "$command" ] && print_usage "$exec_name" && exit 0 || :
+		bridge_url=`echo $command | egrep -o "(http|https)://[^/\"]+/$BRIDGE_REGEX"`
+		exit_if_empty "$bridge_url" "$ERROR_INVALID_BRIDGE_URL"
+		check_url_works_or_exit "$bridge_url/ping"
+		;;		
+	esac
+
+	get_bridge_info_json "$bridge_url" bridge_info
+	check_build "$bridge_url" "$bridge_info"
+	check_proof "$bridge_url" "$bridge_info"
+	
+	exit 0
+}
+
+main $@

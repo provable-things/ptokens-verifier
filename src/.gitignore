@@ -1,0 +1,8 @@
+
+!./tests/res/app-debug.apk
+
+# Python
+
+__pycache__
+.venv
+
