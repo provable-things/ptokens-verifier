@@ -6,7 +6,7 @@ FROM provable/ptokens-strongbox-base:$BASE_VERSION
 
 LABEL maintainer="Provable Things Ltd. <info@provable.xyz>" \
     description="Deterministically reproduce pTokens Android apps." \
-    version="1.0"
+    version="1.1"
 
 COPY --chown=provable:provable --from=0 /root/core /home/provable/core
 

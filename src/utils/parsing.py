@@ -37,6 +37,13 @@ def get_args():
     )
 
     parser.add_argument(
+        '--print-attested-message',
+        dest='print_attested_message',
+        action='store_true',
+        help="print the attested message in a JSON format"
+    )
+
+    parser.add_argument(
         '--stdout',
         action='store_true',
         help="prints logging to stdout"
@@ -51,7 +58,7 @@ def get_args():
     parser.add_argument(
         '--version',
         action='version',
-        version='%(prog)s 1.2'
+        version='%(prog)s 1.3'
     )
 
     return parser.parse_args()
