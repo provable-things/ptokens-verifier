@@ -9,6 +9,7 @@ from base64 import (
 )
 
 import cbor2
+import codecs
 
 from pyasn1.codec.ber import decoder
 from cryptography import x509
@@ -315,6 +316,11 @@ class Proof(object):
             self.verify_strongbox_leaf_cert_digest(apkcerthash)
 
         return passed
+
+    def get_attested_message(self):
+        if not self.commitment:
+            raise ProofEmptyError()
+        return cbor2.loads(self.commitment[5:])
 
     @staticmethod
     def parse(filename):

@@ -85,3 +85,8 @@ def test_verify_safetynetonly_proof(proof_sample_wout_strongbox):
 def test_verify_safetynet_for_a_proof_wout_attestations():
     with pytest.raises(ProofEmptyError):
         Proof.parse(PROOF_ANDROID_EMPTY)
+
+def test_get_attested_message_w_empty_proof(proof_sample):
+    msg = proof_sample.get_attested_message()
+
+    assert len(msg) > 0

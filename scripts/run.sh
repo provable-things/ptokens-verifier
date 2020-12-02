@@ -10,14 +10,14 @@ function logd() {
 	local output
 	output=""
 	if [[ -z "$1" ]]; then read output; else output="$1"; fi
-	if ! [[ -z $DEBUG ]]; then echo "[DEBUG]: $1"; fi
+	if ! [[ -z $DEBUG ]]; then >&2 echo "[DEBUG]: $1"; fi
 }
 
 function logi() {
 	local output
 	output=""
 	if [[ -z "$1" ]]; then read output; else output="$1"; fi
-	if [[ ! -z $DEBUG || ! -z $INFO ]]; then echo "[INFO]: $output"; fi
+	if [[ ! -z $DEBUG || ! -z $INFO ]]; then >&2 echo "[INFO]: $output"; fi
 }
 
 function loge() {
@@ -94,7 +94,10 @@ function main() {
 	logi "APK hash: $apk_hash"
 	logi "APK certificate hash: $apk_cert_hash"
 
-	./src/verify $proof_path $apk_hash $apk_cert_hash
+	tmp=( "$@" )
+    OPTIONS=${tmp[@]:2}
+
+	./src/verify $proof_path $apk_hash $apk_cert_hash $OPTIONS
 
 	if [[ ! $? -eq 0 ]]; then
 		loge "Proof not passed"

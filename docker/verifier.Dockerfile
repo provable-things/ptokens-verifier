@@ -6,7 +6,7 @@ LABEL maintainer="Provable Things Ltd <info@provable.xyz>" \
       description="Downloads the evidence from each specified bridge, \
       verifies the APK pulled from the specified IPFS gateway along   \
       with the returned proof." \
-      version="1.2"
+      version="1.3"
 
 RUN groupadd provable && \
     useradd -m -g provable provable && \

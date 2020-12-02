@@ -22,8 +22,8 @@ APP_VERSION_KEY_NAME=app_version
 DOCKER_SRC_CODE_PATH=/home/provable/apps/strongbox
 DOCKER_CACHE_PATH=/home/provable/cache
 DOCKER_APKDIFF_VERSION=1.0
-DOCKER_BUILD_VERSION=1.0
-DOCKER_VERIFIER_VERSION=1.2
+DOCKER_BUILD_VERSION=1.1
+DOCKER_VERIFIER_VERSION=1.3
 BRIDGE_REGEX='p[a-z]{2,}-on-[a-z]{3,}'
 CACHE_PATH=./cache
 DEBUG=0
@@ -35,8 +35,10 @@ ERROR_INVALID_GITHUB_URL="Invalid github url"
 ERROR_INVALID_VERSION_TAG="Invalid version tag"
 ERROR_INVALID_SOURCE_FOLDER="Invalid source folder"
 
+OPTIONS_FOR_VERIFIER=""
+
 function print_version() {
-	echo "v$VERSION"
+	printf "v$VERSION\n"
 	exit 0
 }
 
@@ -47,10 +49,10 @@ function print_usage() {
 	format="  %-30s %-20s\n"
 	exec_name=$1
 	printf "Usage:\n"
-	printf "./$exec_name <url>\n"
-	printf "./$exec_name check-build <url>\n"
-	printf "./$exec_name check-proof <url>\n"
-	printf "./$exec_name help\n"
+	printf "./$exec_name [OPTIONS] <url>\n"
+	printf "./$exec_name [OPTIONS] check-build <url>\n"
+	printf "./$exec_name [OPTIONS] check-proof <url>\n"
+	printf "./$exec_name [OPTIONS] help\n"
 	printf "\n"
 	printf "Commands:\n"
 	printf "$format" "<no-command>" "performs 'check-build' and then 'check-proof'"
@@ -66,6 +68,9 @@ function print_usage() {
 	printf "\n"
 	printf "Parameters:\n"
 	printf "$format" "url" 			"bridge's URL"
+	printf "\n"
+	printf "Options:\n"
+	printf "$format" "--print-attested-message"		"Prints to stdout the attested message in JSON format"
 	printf "\n"
 	printf "Advanced configuration (env variables):\n"
 	printf "$format" "GITHUB_ACCESS_SSH_KEY_PATH" "optional ssh key to access github if GITHUB_PATH is private "
@@ -84,14 +89,14 @@ function logd() {
 	local output
 	output=""
 	if [[ -z "$1" ]]; then read output; else output="$1"; fi
-	if ! [[ -z $DEBUG ]]; then echo "[DEBUG]: $1"; fi
+	if ! [[ -z $DEBUG ]]; then >&2 echo "[DEBUG]: $1"; fi
 }
 
 function logi() {
 	local output
 	output=""
 	if [[ -z "$1" ]]; then read output; else output="$1"; fi
-	if [[ ! -z $DEBUG || ! -z $INFO ]]; then echo "[INFO]: $output"; fi
+	if [[ ! -z $DEBUG || ! -z $INFO ]]; then >&2 echo "[INFO]: $output"; fi
 }
 
 function loge() {
@@ -106,6 +111,7 @@ function build_app() {
 	src_folder=$2
 
 	docker run \
+		--rm \
 	    -v gradle:/home/provable/.gradle \
 	    -v $(pwd)/$src_folder:$DOCKER_SRC_CODE_PATH \
 	    --env BRIDGE_NAME=$bridge_name \
@@ -122,10 +128,11 @@ function verify_proof() {
 	proof_path=$3
 	
 	docker run \
+		--rm \
 		-v $(pwd)/$CACHE_PATH:$DOCKER_CACHE_PATH \
 		--env INFO=1 \
 		--env DEBUG=$DEBUG \
-		provable/ptokens-verifier:${DOCKER_VERIFIER_VERSION} $app_path $proof_path
+		provable/ptokens-verifier:${DOCKER_VERIFIER_VERSION} $app_path $proof_path $OPTIONS_FOR_VERIFIER
 }
 
 function github_ssh_clone() {
@@ -527,6 +534,7 @@ function check_proof() {
 	verify_proof "$src_folder" "$untrusted_app_path" "$proof_path"
 }
 
+
 function main() {
 	local exec_name
 	local command
@@ -534,11 +542,19 @@ function main() {
 	local bridge_info
 
 	exec_name=`basename $0`
-	command=$1
+	
+	# Note: apparently the following can't be grouped inside a function, leaving
+	# as it is for now
+	OPTIONS_FOR_VERIFIER=`echo "$@" | grep -o "\-\-print\-attested\-message"`
+
+	local cmd_str
+	cmd_str=`echo "$@" | sed s/\-\-print\-attested\-message//g`
+	cmd_str=($cmd_str)
+	command=${cmd_str[0]}
 
 	case $command in
 	check-build )
-		bridge_url=$2
+		bridge_url=${cmd_str[1]}
 		exit_if_empty "$bridge_url" "$ERROR_INVALID_BRIDGE_URL"
 		check_url_works_or_exit "$bridge_url/ping"
 		get_bridge_info_json "$bridge_url" bridge_info
@@ -547,7 +563,7 @@ function main() {
 		exit 0
 		;;
 	check-proof )
-		bridge_url=$2
+		bridge_url=${cmd_str[1]}
 		exit_if_empty "$bridge_url" "$ERROR_INVALID_BRIDGE_URL"
 		check_url_works_or_exit "$bridge_url/ping"
 		get_bridge_info_json "$bridge_url" bridge_info
